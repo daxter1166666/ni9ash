@@ -106,6 +106,7 @@ export function useLiveKitVoice({
 
   // Audio autoplay resume for iOS Safari and mobile browsers
   const unlockAudioAutoplay = useCallback(() => {
+    sessionRef.current?.resumeAudioContext();
     const AudioCtx = window.AudioContext || (window as any).webkitAudioContext;
     if (AudioCtx) {
       const ctx = new AudioCtx();

@@ -124,22 +124,337 @@ export class MicTester {
 }
 
 /**
- * High-performance LiveKit Voice Room Session Manager
- * Audio-only, Opus 32-48kbps, automated speaker permission sync
+ * Built-in Real-Time Audio Engine over WebSockets & Web Audio API
+ * Provides low-latency 16kHz PCM voice broadcasting between debaters and audience
+ * without requiring external LiveKit cloud subscriptions.
+ */
+export class BuiltinWebSocketVoiceSession {
+  private ws: WebSocket | null = null;
+  private audioCtx: AudioContext | null = null;
+  private micStream: MediaStream | null = null;
+  private scriptProcessor: ScriptProcessorNode | null = null;
+  private isConnected = false;
+  private isMutedByUser = false;
+  private nextPlayTime = 0;
+  private speakingDecayTimer: any = null;
+  private activeSpeakersMap: Map<string, number> = new Map();
+  private pingInterval: any = null;
+
+  constructor(private options: UseVoiceOptions) {}
+
+  async connect(): Promise<boolean> {
+    try {
+      this.options.onConnectionStatusChange?.('connecting');
+
+      const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+      const wsUrl = `${protocol}//${window.location.host}/ws/voice`;
+      this.ws = new WebSocket(wsUrl);
+      this.ws.binaryType = 'arraybuffer';
+
+      // Initialize AudioContext for receiving / playing audio
+      const AudioContextClass = window.AudioContext || (window as any).webkitAudioContext;
+      if (AudioContextClass) {
+        this.audioCtx = new AudioContextClass({ sampleRate: 16000 });
+      }
+
+      this.ws.onopen = () => {
+        this.isConnected = true;
+        this.options.onConnectionStatusChange?.('connected');
+
+        // Send Join Handshake
+        this.ws?.send(
+          JSON.stringify({
+            type: 'join',
+            roomId: this.options.roomId,
+            userId: this.options.userId,
+            userName: this.options.userName,
+            role: this.options.isDebater ? 'debater' : 'audience',
+          })
+        );
+
+        // Ping heartbeat every 20s
+        this.pingInterval = setInterval(() => {
+          if (this.ws?.readyState === WebSocket.OPEN) {
+            this.ws.send(JSON.stringify({ type: 'ping' }));
+          }
+        }, 20000);
+
+        // If currently allowed to speak, start mic
+        if (this.options.isDebater && (this.options.isMyTurn || this.options.freeTalk) && !this.isMutedByUser) {
+          this.startMicrophoneCapture();
+        }
+      };
+
+      this.ws.onmessage = (event) => {
+        if (event.data instanceof ArrayBuffer) {
+          this.handleIncomingAudio(event.data);
+        } else if (typeof event.data === 'string') {
+          try {
+            const data = JSON.parse(event.data);
+            if (data.type === 'turn_update') {
+              const isMyTurn = data.currentSpeakerId === this.options.userId;
+              this.updateTurnPermissions(isMyTurn, Boolean(data.freeTalk));
+            }
+          } catch {}
+        }
+      };
+
+      this.ws.onclose = () => {
+        this.isConnected = false;
+        this.options.onConnectionStatusChange?.('disconnected');
+      };
+
+      this.ws.onerror = (err) => {
+        console.warn('[BuiltinVoice] WebSocket error:', err);
+      };
+
+      return true;
+    } catch (err: any) {
+      console.error('[BuiltinVoice] Error connecting:', err);
+      this.options.onConnectionStatusChange?.('error');
+      this.options.onError?.(err?.message || 'تعذر الاتصال بالبث الصوتي');
+      return false;
+    }
+  }
+
+  // Handle incoming binary PCM audio chunk from other speaker
+  private handleIncomingAudio(buffer: ArrayBuffer) {
+    if (buffer.byteLength < 4) return;
+    const view = new DataView(buffer);
+    const packetType = view.getUint8(0);
+    if (packetType !== 1) return; // 1 = Audio PCM
+
+    const idLen = view.getUint16(1);
+    if (buffer.byteLength < 3 + idLen) return;
+
+    const idBytes = new Uint8Array(buffer, 3, idLen);
+    const senderId = new TextDecoder().decode(idBytes);
+
+    // If packet from self, ignore
+    if (senderId === this.options.userId) return;
+
+    // Remaining bytes are Int16Array PCM samples
+    const pcmByteOffset = 3 + idLen;
+    const sampleCount = Math.floor((buffer.byteLength - pcmByteOffset) / 2);
+    if (sampleCount <= 0) return;
+
+    const int16 = new Int16Array(buffer, pcmByteOffset, sampleCount);
+    const float32 = new Float32Array(sampleCount);
+
+    let sumSquares = 0;
+    for (let i = 0; i < sampleCount; i++) {
+      const s = int16[i];
+      const val = s < 0 ? s / 0x8000 : s / 0x7fff;
+      float32[i] = val;
+      sumSquares += val * val;
+    }
+
+    const rms = Math.sqrt(sumSquares / sampleCount);
+    if (rms > 0.02) {
+      this.activeSpeakersMap.set(senderId, Date.now());
+      this.refreshActiveSpeakers();
+    }
+
+    // Playback through Web Audio API
+    this.playPcmBuffer(float32);
+  }
+
+  private playPcmBuffer(samples: Float32Array) {
+    if (!this.audioCtx) return;
+    if (this.audioCtx.state === 'suspended') {
+      return;
+    }
+
+    try {
+      const audioBuffer = this.audioCtx.createBuffer(1, samples.length, 16000);
+      audioBuffer.getChannelData(0).set(samples);
+
+      const source = this.audioCtx.createBufferSource();
+      source.buffer = audioBuffer;
+      source.connect(this.audioCtx.destination);
+
+      const currentTime = this.audioCtx.currentTime;
+      if (this.nextPlayTime < currentTime || this.nextPlayTime - currentTime > 0.4) {
+        this.nextPlayTime = currentTime + 0.02;
+      }
+
+      source.start(this.nextPlayTime);
+      this.nextPlayTime += audioBuffer.duration;
+    } catch (e) {
+      console.warn('[BuiltinVoice] Playback error:', e);
+    }
+  }
+
+  private refreshActiveSpeakers() {
+    const now = Date.now();
+    const active: string[] = [];
+    for (const [id, time] of this.activeSpeakersMap.entries()) {
+      if (now - time < 800) {
+        active.push(id);
+      } else {
+        this.activeSpeakersMap.delete(id);
+      }
+    }
+    this.options.onActiveSpeakersChange?.(active);
+
+    if (this.speakingDecayTimer) clearTimeout(this.speakingDecayTimer);
+    if (active.length > 0) {
+      this.speakingDecayTimer = setTimeout(() => {
+        this.refreshActiveSpeakers();
+      }, 500);
+    }
+  }
+
+  async updateTurnPermissions(isMyTurn: boolean, freeTalk: boolean) {
+    this.options.isMyTurn = isMyTurn;
+    this.options.freeTalk = freeTalk;
+
+    const canSpeak = this.options.isDebater && (isMyTurn || freeTalk) && !this.isMutedByUser;
+    if (canSpeak) {
+      await this.startMicrophoneCapture();
+    } else {
+      this.stopMicrophoneCapture();
+    }
+  }
+
+  async setMute(muted: boolean) {
+    this.isMutedByUser = muted;
+    if (muted) {
+      this.stopMicrophoneCapture();
+    } else {
+      if (this.options.isDebater && (this.options.isMyTurn || this.options.freeTalk)) {
+        await this.startMicrophoneCapture();
+      }
+    }
+  }
+
+  private async startMicrophoneCapture() {
+    if (this.micStream) return;
+    try {
+      if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+        throw new Error('Microphone not supported on this browser');
+      }
+
+      this.micStream = await navigator.mediaDevices.getUserMedia({
+        audio: {
+          echoCancellation: true,
+          noiseSuppression: true,
+          autoGainControl: true,
+        },
+      });
+
+      if (!this.audioCtx) {
+        const AudioContextClass = window.AudioContext || (window as any).webkitAudioContext;
+        this.audioCtx = new AudioContextClass({ sampleRate: 16000 });
+      }
+
+      if (this.audioCtx.state === 'suspended') {
+        await this.audioCtx.resume().catch(() => {});
+      }
+
+      const source = this.audioCtx.createMediaStreamSource(this.micStream);
+      this.scriptProcessor = this.audioCtx.createScriptProcessor(2048, 1, 1);
+
+      const userIdBytes = new TextEncoder().encode(this.options.userId);
+      const headerLength = 3 + userIdBytes.length;
+
+      this.scriptProcessor.onaudioprocess = (e) => {
+        if (!this.isConnected || this.isMutedByUser || this.ws?.readyState !== WebSocket.OPEN) return;
+        const inputData = e.inputBuffer.getChannelData(0);
+
+        let sum = 0;
+        const sampleCount = inputData.length;
+        const int16 = new Int16Array(sampleCount);
+
+        for (let i = 0; i < sampleCount; i++) {
+          const s = Math.max(-1, Math.min(1, inputData[i]));
+          int16[i] = s < 0 ? s * 0x8000 : s * 0x7fff;
+          sum += s * s;
+        }
+
+        const rms = Math.sqrt(sum / sampleCount);
+        if (rms > 0.02) {
+          this.activeSpeakersMap.set(this.options.userId, Date.now());
+          this.refreshActiveSpeakers();
+        }
+
+        // Pack binary frame
+        const totalBytes = headerLength + int16.byteLength;
+        const packet = new Uint8Array(totalBytes);
+        packet[0] = 1; // 1 = Audio
+        packet[1] = (userIdBytes.length >> 8) & 0xff;
+        packet[2] = userIdBytes.length & 0xff;
+        packet.set(userIdBytes, 3);
+        packet.set(new Uint8Array(int16.buffer, int16.byteOffset, int16.byteLength), headerLength);
+
+        this.ws.send(packet.buffer);
+      };
+
+      source.connect(this.scriptProcessor);
+      const dummyGain = this.audioCtx.createGain();
+      dummyGain.gain.value = 0;
+      this.scriptProcessor.connect(dummyGain);
+      dummyGain.connect(this.audioCtx.destination);
+    } catch (err: any) {
+      console.warn('[BuiltinVoice] Microphone start error:', err);
+      if (err.name === 'NotAllowedError') {
+        this.options.onError?.('تم رفض إذن الوصول للميكروفون من الهاتف أو المتصفح');
+      }
+    }
+  }
+
+  private stopMicrophoneCapture() {
+    if (this.scriptProcessor) {
+      this.scriptProcessor.disconnect();
+      this.scriptProcessor = null;
+    }
+    if (this.micStream) {
+      this.micStream.getTracks().forEach((t) => t.stop());
+      this.micStream = null;
+    }
+  }
+
+  resumeAudioContext() {
+    if (this.audioCtx && this.audioCtx.state === 'suspended') {
+      this.audioCtx.resume().catch(() => {});
+    }
+  }
+
+  disconnect() {
+    if (this.pingInterval) {
+      clearInterval(this.pingInterval);
+      this.pingInterval = null;
+    }
+    if (this.speakingDecayTimer) {
+      clearTimeout(this.speakingDecayTimer);
+      this.speakingDecayTimer = null;
+    }
+    this.stopMicrophoneCapture();
+    if (this.ws) {
+      this.ws.close();
+      this.ws = null;
+    }
+    if (this.audioCtx && this.audioCtx.state !== 'closed') {
+      this.audioCtx.close().catch(() => {});
+      this.audioCtx = null;
+    }
+    this.options.onConnectionStatusChange?.('disconnected');
+  }
+}
+
+/**
+ * High-performance Voice Room Session Manager
+ * Audio-only, LiveKit with Built-in WebSocket Audio fallback
  */
 export class LiveKitVoiceSession {
   private room: Room | null = null;
   private attachedElements: HTMLAudioElement[] = [];
-  private isSimulated = false;
-  private simulationInterval: any = null;
+  private builtinSession: BuiltinWebSocketVoiceSession | null = null;
   private micTester: MicTester | null = null;
-
   private activeSpeakerIds: Set<string> = new Set();
   private isMutedByUser = false;
 
-  constructor(
-    private options: UseVoiceOptions
-  ) {}
+  constructor(private options: UseVoiceOptions) {}
 
   async connect(): Promise<boolean> {
     try {
@@ -177,13 +492,18 @@ export class LiveKitVoiceSession {
         throw new Error(data?.error || 'فشل في استلام رمز الدخول للغرفة الصوتية');
       }
 
-      // If simulated fallback (when LiveKit credentials are not yet set in .env)
-      if (data.isSimulated || data.wsUrl === 'simulated') {
-        console.info('[LiveKitVoice] Running in development voice simulation mode');
-        this.isSimulated = true;
-        this.options.onConnectionStatusChange?.('connected');
-        this.startSimulation();
-        return true;
+      // Check if built-in WebSocket audio is requested or fallback
+      const shouldUseBuiltin =
+        data.wsUrl === 'builtin' ||
+        data.isSimulated ||
+        !data.wsUrl ||
+        data.wsUrl.includes('your-livekit-domain') ||
+        data.wsUrl === 'simulated';
+
+      if (shouldUseBuiltin) {
+        console.info('[VoiceSession] Connecting to Built-in Web Audio/WebSocket Voice Engine');
+        this.builtinSession = new BuiltinWebSocketVoiceSession(this.options);
+        return await this.builtinSession.connect();
       }
 
       // 2. Initialize Real LiveKit Room
@@ -218,6 +538,11 @@ export class LiveKitVoiceSession {
       return true;
     } catch (err: any) {
       console.error('[LiveKitVoice] Connection error:', err);
+      if (!this.builtinSession) {
+        console.info('[LiveKitVoice] Falling back to Built-in WebSocket Voice');
+        this.builtinSession = new BuiltinWebSocketVoiceSession(this.options);
+        return await this.builtinSession.connect();
+      }
       this.options.onConnectionStatusChange?.('error');
       this.options.onError?.(err.message || 'حدث خطأ أثناء الاتصال بالغرفة الصوتية');
       return false;
@@ -234,7 +559,6 @@ export class LiveKitVoiceSession {
         audioElement.autoplay = true;
         this.attachedElements.push(audioElement);
 
-        // Attempt playback, handle iOS autoplay blocks
         audioElement.play().catch((playErr) => {
           console.warn('[LiveKitVoice] Autoplay was prevented:', playErr);
         });
@@ -270,14 +594,13 @@ export class LiveKitVoiceSession {
     });
   }
 
-  // Update publishing state when turns rotate
   async updateTurnPermissions(isMyTurn: boolean, freeTalk: boolean) {
-    if (this.isSimulated) {
+    if (this.builtinSession) {
+      await this.builtinSession.updateTurnPermissions(isMyTurn, freeTalk);
       return;
     }
 
     if (!this.room) return;
-
     const canSpeak = this.options.isDebater && (isMyTurn || freeTalk) && !this.isMutedByUser;
 
     try {
@@ -291,15 +614,25 @@ export class LiveKitVoiceSession {
     }
   }
 
-  // Toggle local mute
   async setMute(muted: boolean) {
     this.isMutedByUser = muted;
+    if (this.builtinSession) {
+      await this.builtinSession.setMute(muted);
+      return;
+    }
+
     if (this.room) {
       try {
         await this.room.localParticipant.setMicrophoneEnabled(!muted);
       } catch (e) {
         console.warn('[LiveKitVoice] Failed to set microphone state:', e);
       }
+    }
+  }
+
+  resumeAudioContext() {
+    if (this.builtinSession) {
+      this.builtinSession.resumeAudioContext();
     }
   }
 
@@ -319,11 +652,10 @@ export class LiveKitVoiceSession {
     }
   }
 
-  // Disconnect & Cleanup
   disconnect() {
-    if (this.simulationInterval) {
-      clearInterval(this.simulationInterval);
-      this.simulationInterval = null;
+    if (this.builtinSession) {
+      this.builtinSession.disconnect();
+      this.builtinSession = null;
     }
 
     if (this.micTester) {
@@ -342,16 +674,5 @@ export class LiveKitVoiceSession {
     });
     this.attachedElements = [];
     this.options.onConnectionStatusChange?.('disconnected');
-  }
-
-  // Simulated active speaker animation for local dev/testing
-  private startSimulation() {
-    this.simulationInterval = setInterval(() => {
-      if (this.options.isMyTurn) {
-        this.options.onActiveSpeakersChange?.([this.options.userId]);
-      } else {
-        this.options.onActiveSpeakersChange?.([]);
-      }
-    }, 1200);
   }
 }

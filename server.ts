@@ -1,5 +1,8 @@
-import express, { Request, Response } from "express";
+import express from "express";
+import type { Request, Response } from "express";
 import path from "path";
+import http from "http";
+import { WebSocketServer, WebSocket } from "ws";
 import { createServer as createViteServer } from "vite";
 import { GoogleGenAI } from "@google/genai";
 import dotenv from "dotenv";
@@ -19,12 +22,22 @@ const LIVEKIT_API_SECRET = process.env.LIVEKIT_API_SECRET || "";
 const LIVEKIT_WEBHOOK_SECRET = process.env.LIVEKIT_WEBHOOK_SECRET || LIVEKIT_API_SECRET || "";
 const VOICE_ONLY_MODE = process.env.VOICE_ONLY_MODE !== "false";
 const VOICE_ROOM_MAX_DURATION_MINUTES = parseInt(process.env.VOICE_ROOM_MAX_DURATION_MINUTES || "120", 10);
-const VOICE_ROOM_MAX_AUDIENCE = parseInt(process.env.VOICE_ROOM_MAX_AUDIENCE || "500", 10);
+const VOICE_ROOM_MAX_AUDIENCE = parseInt(process.env.VOICE_ROOM_MAX_AUDIENCE || "2000", 10);
+
+// Check if credentials are placeholders from template/import
+export const isPlaceholderLiveKit =
+  !LIVEKIT_URL ||
+  LIVEKIT_URL.includes("your-livekit-domain") ||
+  LIVEKIT_URL.includes("example.com") ||
+  LIVEKIT_API_KEY.includes("APIxxx") ||
+  LIVEKIT_API_KEY.length < 5 ||
+  LIVEKIT_API_SECRET.includes("secretxxx") ||
+  LIVEKIT_API_SECRET.length < 5;
 
 let roomServiceClient: RoomServiceClient | null = null;
 let webhookReceiver: WebhookReceiver | null = null;
 
-if (LIVEKIT_URL && LIVEKIT_API_KEY && LIVEKIT_API_SECRET) {
+if (!isPlaceholderLiveKit && LIVEKIT_URL && LIVEKIT_API_KEY && LIVEKIT_API_SECRET) {
   try {
     const httpUrl = LIVEKIT_URL.replace(/^wss:\/\//, "https://").replace(/^ws:\/\//, "http://");
     roomServiceClient = new RoomServiceClient(httpUrl, LIVEKIT_API_KEY, LIVEKIT_API_SECRET);
@@ -177,8 +190,36 @@ interface ReportItem {
 
 const reports: ReportItem[] = [];
 
-// Helper to synchronize live permissions in LiveKit room
+interface VoiceClientSession {
+  ws: WebSocket;
+  roomId: string;
+  userId: string;
+  userName: string;
+  role: 'host' | 'debater' | 'audience';
+}
+
+const voiceRoomsMap = new Map<string, Set<VoiceClientSession>>();
+
+function broadcastVoiceRoomEvent(roomId: string, event: any) {
+  const clients = voiceRoomsMap.get(roomId);
+  if (!clients) return;
+  const payload = JSON.stringify(event);
+  for (const client of clients) {
+    if (client.ws.readyState === WebSocket.OPEN) {
+      client.ws.send(payload);
+    }
+  }
+}
+
+// Helper to synchronize live permissions in LiveKit room and WebSocket voice clients
 async function syncLiveKitRoomPermissions(room: DebateRoom) {
+  broadcastVoiceRoomEvent(room.id, {
+    type: 'turn_update',
+    currentSpeakerId: room.currentSpeakerId,
+    freeTalk: Boolean(room.freeTalk),
+    turnStartedAt: room.turnStartedAt,
+  });
+
   if (!roomServiceClient || room.mode !== 'voice') return;
   try {
     const debaters = room.participants.filter(p => p.role === 'host' || p.role === 'debater');
@@ -1406,8 +1447,9 @@ app.post("/api/livekit/token", async (req: Request, res: Response) => {
   const isDebater = participant ? (participant.role === 'host' || participant.role === 'debater') : false;
   const isHost = room.hostId === userId || participant?.role === 'host';
 
-  // Audience limit check
-  if (!isDebater && room.spectatorsCount >= VOICE_ROOM_MAX_AUDIENCE) {
+  // Audience limit check (allow at least 1000 or current count + 100)
+  const maxAudience = Math.max(VOICE_ROOM_MAX_AUDIENCE, (room.spectatorsCount || 0) + 100, 1000);
+  if (!isDebater && room.spectatorsCount >= maxAudience) {
     return res.status(403).json({ success: false, error: "اكتمل الحد الأقصى لسعة الجمهور في هذه الغرفة" });
   }
 
@@ -1418,13 +1460,13 @@ app.post("/api/livekit/token", async (req: Request, res: Response) => {
   // Seated speakers: canPublish strictly according to current turn or free talk
   const canPublish = isDebater && !isMutedByHost && (isFreeTalk || isCurrentSpeaker);
 
-  // If LiveKit credentials are not yet configured in .env, return sandbox info for smooth UI demo
-  if (!LIVEKIT_URL || !LIVEKIT_API_KEY || !LIVEKIT_API_SECRET) {
+  // If LiveKit credentials are placeholder or not yet configured, return builtin real WebSocket voice mode
+  if (isPlaceholderLiveKit || !LIVEKIT_URL || !LIVEKIT_API_KEY || !LIVEKIT_API_SECRET) {
     return res.json({
       success: true,
-      token: "simulated_token_" + userId + "_" + Date.now(),
-      wsUrl: "simulated",
-      isSimulated: true,
+      token: "builtin_ws_" + userId + "_" + Date.now(),
+      wsUrl: "builtin",
+      isSimulated: false,
       mode: room.mode || 'text',
       canPublish,
       isCurrentSpeaker,
@@ -1670,7 +1712,8 @@ app.get("/api/config", (req: Request, res: Response) => {
     voiceOnlyMode: VOICE_ONLY_MODE,
     maxAudience: VOICE_ROOM_MAX_AUDIENCE,
     maxDurationMinutes: VOICE_ROOM_MAX_DURATION_MINUTES,
-    hasLiveKit: Boolean(LIVEKIT_URL && LIVEKIT_API_KEY && LIVEKIT_API_SECRET),
+    hasLiveKit: !isPlaceholderLiveKit,
+    hasBuiltinVoice: true,
   });
 });
 
@@ -1743,7 +1786,69 @@ async function startServer() {
     });
   }
 
-  app.listen(PORT, "0.0.0.0", () => {
+  const server = http.createServer(app);
+  const wss = new WebSocketServer({ server, path: "/ws/voice" });
+
+  wss.on("connection", (ws: WebSocket) => {
+    let clientSession: VoiceClientSession | null = null;
+
+    ws.on("message", (data: any, isBinary: boolean) => {
+      if (isBinary) {
+        if (!clientSession) return;
+        const roomClients = voiceRoomsMap.get(clientSession.roomId);
+        if (!roomClients) return;
+
+        // Check if user is allowed to speak
+        const room = rooms.get(clientSession.roomId);
+        const p = room?.participants.find(pt => pt.id === clientSession!.userId);
+        const canSpeak = p && (p.role === 'host' || p.role === 'debater') && !p.isMuted &&
+          (Boolean(room?.freeTalk) || room?.currentSpeakerId === clientSession.userId);
+
+        if (canSpeak) {
+          // Forward binary audio packet to all other listeners in the room
+          for (const client of roomClients) {
+            if (client !== clientSession && client.ws.readyState === WebSocket.OPEN) {
+              client.ws.send(data, { binary: true });
+            }
+          }
+        }
+      } else {
+        try {
+          const msg = JSON.parse(data.toString());
+          if (msg.type === "join") {
+            const { roomId, userId, userName, role } = msg;
+            clientSession = { ws, roomId, userId, userName, role };
+            if (!voiceRoomsMap.has(roomId)) {
+              voiceRoomsMap.set(roomId, new Set());
+            }
+            voiceRoomsMap.get(roomId)!.add(clientSession);
+            ws.send(JSON.stringify({ type: "joined", success: true, roomId, userId }));
+          } else if (msg.type === "ping") {
+            ws.send(JSON.stringify({ type: "pong" }));
+          }
+        } catch {
+          // Ignore invalid JSON
+        }
+      }
+    });
+
+    const cleanup = () => {
+      if (clientSession) {
+        const set = voiceRoomsMap.get(clientSession.roomId);
+        if (set) {
+          set.delete(clientSession);
+          if (set.size === 0) {
+            voiceRoomsMap.delete(clientSession.roomId);
+          }
+        }
+      }
+    };
+
+    ws.on("close", cleanup);
+    ws.on("error", cleanup);
+  });
+
+  server.listen(PORT, "0.0.0.0", () => {
     console.log(`Munazara Server running on http://localhost:${PORT}`);
   });
 }

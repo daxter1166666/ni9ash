@@ -116,13 +116,13 @@ export const CreateRoomModal: React.FC<CreateRoomModalProps> = ({
         <div className="mb-6">
           <div className="flex items-center gap-2 text-indigo-600 text-xs font-bold uppercase tracking-wider mb-1">
             <Sparkles className="h-4 w-4" />
-            <span>{t('createModalSubtitle')}</span>
+            <span>{t('createModalBadge')}</span>
           </div>
           <h2 className="font-heading text-2xl font-bold text-gray-900">
             {t('createModalTitle')}
           </h2>
           <p className="text-xs text-gray-500 mt-1">
-            {t('createModalHint')}
+            {t('createModalDesc')}
           </p>
         </div>
 
