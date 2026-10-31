@@ -1,0 +1,15 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 192 192" width="192" height="192">
+  <defs>
+    <linearGradient id="pwa-grad-192" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#4f46e5" />
+      <stop offset="100%" stop-color="#4338ca" />
+    </linearGradient>
+  </defs>
+  <rect width="192" height="192" rx="48" fill="url(#pwa-grad-192)" />
+  <g transform="translate(38, 38)">
+    <path d="M58 10 C86 10, 105 22, 105 52 C105 86, 68 101, 58 107 C48 101, 11 86, 11 52 C11 22, 30 10, 58 10 Z" fill="#ffffff" />
+    <rect x="36" y="42" width="16" height="30" rx="4" fill="#10b981" />
+    <rect x="64" y="32" width="16" height="40" rx="4" fill="#ef4444" />
+    <circle cx="58" cy="53" r="7" fill="#4f46e5" />
+  </g>
+</svg>

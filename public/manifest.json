@@ -1,0 +1,44 @@
+{
+  "name": "مناظرة | منصة الحوار والمناظرات الحية",
+  "short_name": "مناظرة PWA",
+  "description": "تطبيق غرف النقاش والمناظرات التفاعلية 1 ضد 1 وحلقات النقاش الجماعية مع تحكيم وتصويت الجمهور المباشر.",
+  "start_url": "/",
+  "id": "/",
+  "display": "standalone",
+  "background_color": "#F9FAFB",
+  "theme_color": "#4f46e5",
+  "dir": "rtl",
+  "lang": "ar",
+  "orientation": "portrait-primary",
+  "categories": ["social", "education", "productivity"],
+  "icons": [
+    {
+      "src": "/icon-192.svg",
+      "sizes": "192x192",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    },
+    {
+      "src": "/icon-512.svg",
+      "sizes": "512x512",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    }
+  ],
+  "shortcuts": [
+    {
+      "name": "فتح غرفة جديدة",
+      "short_name": "غرفة جديدة",
+      "description": "أنشئ غرفة مناظرة 1 ضد 1 أو نقاش جماعي",
+      "url": "/?action=create",
+      "icons": [{ "src": "/icon-192.svg", "sizes": "192x192" }]
+    },
+    {
+      "name": "مناظرات 1 ضد 1",
+      "short_name": "مناظرات 1v1",
+      "description": "تصفح ساحات المبارزة الثنائية المباشرة",
+      "url": "/?filter=1v1",
+      "icons": [{ "src": "/icon-192.svg", "sizes": "192x192" }]
+    }
+  ]
+}

@@ -1,0 +1,42 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512">
+  <defs>
+    <linearGradient id="pwa-grad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#4f46e5" />
+      <stop offset="50%" stop-color="#6366f1" />
+      <stop offset="100%" stop-color="#4338ca" />
+    </linearGradient>
+    <linearGradient id="accent-grad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#10b981" />
+      <stop offset="100%" stop-color="#059669" />
+    </linearGradient>
+    <filter id="shadow" x="-10%" y="-10%" width="120%" height="120%">
+      <feDropShadow dx="0" dy="12" stdDeviation="16" flood-color="#000000" flood-opacity="0.18" />
+    </filter>
+  </defs>
+
+  <!-- App Rounded Background Base -->
+  <rect width="512" height="512" rx="128" fill="url(#pwa-grad)" />
+
+  <!-- Inner Subtle Border -->
+  <rect x="16" y="16" width="480" height="480" rx="116" fill="none" stroke="#ffffff" stroke-width="4" stroke-opacity="0.15" />
+
+  <!-- Central Emblem: Crossed Debate Podiums / Sparks & Scales -->
+  <g filter="url(#shadow)" transform="translate(100, 100)">
+    <!-- Shield / Arena Base -->
+    <path d="M156 30 C230 30, 280 60, 280 140 C280 230, 180 270, 156 286 C132 270, 32 230, 32 140 C32 60, 82 30, 156 30 Z" fill="#ffffff" fill-opacity="0.95" />
+    
+    <!-- Pro & Con Dueling Waves inside Shield -->
+    <!-- Pro Emerald Bar -->
+    <path d="M96 110 L140 110 L140 190 L96 190 Z" fill="url(#accent-grad)" rx="10" />
+    <!-- Con Rose Bar -->
+    <path d="M172 80 L216 80 L216 190 L172 190 Z" fill="#ef4444" rx="10" />
+    
+    <!-- VS Balance Beam -->
+    <circle cx="156" cy="140" r="18" fill="#4f46e5" />
+    <path d="M150 140 L162 140 M156 134 L156 146" stroke="#ffffff" stroke-width="3" stroke-linecap="round" />
+    
+    <!-- Speech Bubbles above -->
+    <circle cx="90" cy="65" r="16" fill="#10b981" />
+    <circle cx="222" cy="50" r="16" fill="#ef4444" />
+  </g>
+</svg>
