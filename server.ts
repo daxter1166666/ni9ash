@@ -1,6 +1,7 @@
 import express from "express";
 import type { Request, Response } from "express";
 import path from "path";
+import fs from "fs";
 import http from "http";
 import { WebSocketServer, WebSocket } from "ws";
 import { createServer as createViteServer } from "vite";
@@ -240,10 +241,84 @@ async function syncLiveKitRoomPermissions(room: DebateRoom) {
   }
 }
 
-// Initial Rich Sample Rooms
+// Persistent JSON Database Storage for Cross-Device Synchronization
+interface UserAccount {
+  id: string;
+  name: string;
+  email: string;
+  handle: string;
+  password?: string;
+  avatar: string;
+  bio: string;
+  debatesCount: number;
+  winsCount: number;
+  audienceVotesReceived: number;
+}
+
+interface AppDatabase {
+  rooms: Record<string, DebateRoom>;
+  users: Record<string, UserAccount>;
+  reports: ReportItem[];
+}
+
+const DATA_DIR = path.join(process.cwd(), 'data');
+const DB_FILE = path.join(DATA_DIR, 'db.json');
+
+let db: AppDatabase = {
+  rooms: {},
+  users: {},
+  reports: [],
+};
+
 const rooms: Map<string, DebateRoom> = new Map();
 
+function loadDatabase() {
+  try {
+    if (!fs.existsSync(DATA_DIR)) {
+      fs.mkdirSync(DATA_DIR, { recursive: true });
+    }
+    if (fs.existsSync(DB_FILE)) {
+      const raw = fs.readFileSync(DB_FILE, 'utf-8');
+      const parsed = JSON.parse(raw);
+      if (parsed && parsed.rooms && Object.keys(parsed.rooms).length > 0) {
+        db.rooms = parsed.rooms;
+        rooms.clear();
+        for (const [id, room] of Object.entries(db.rooms)) {
+          rooms.set(id, room as DebateRoom);
+        }
+      }
+      if (parsed && parsed.users) {
+        db.users = parsed.users;
+      }
+      if (parsed && parsed.reports) {
+        reports.push(...parsed.reports);
+      }
+      console.log(`[Database] Loaded ${rooms.size} rooms and ${Object.keys(db.users).length} users from disk.`);
+    }
+  } catch (err) {
+    console.warn("Failed to load db.json:", err);
+  }
+}
+
+function saveDatabase() {
+  try {
+    if (!fs.existsSync(DATA_DIR)) {
+      fs.mkdirSync(DATA_DIR, { recursive: true });
+    }
+    const roomsObj: Record<string, DebateRoom> = {};
+    for (const [id, r] of rooms.entries()) {
+      roomsObj[id] = r;
+    }
+    db.rooms = roomsObj;
+    db.reports = reports;
+    fs.writeFileSync(DB_FILE, JSON.stringify(db, null, 2), 'utf-8');
+  } catch (err) {
+    console.warn("Failed to save db.json:", err);
+  }
+}
+
 function seedInitialRooms() {
+  if (rooms.size > 0) return;
   // 0. Solo Presentation Room (1 Seat Max - Solo Keynote / Monologue)
   const room0: DebateRoom = {
     id: "room-solo-agi-future",
@@ -694,9 +769,63 @@ function seedInitialRooms() {
   rooms.set(room4.id, room4);
 }
 
+loadDatabase();
 seedInitialRooms();
+saveDatabase();
 
 // API Endpoints
+
+// Auth: Sign Up
+app.post("/api/auth/signup", (req: Request, res: Response) => {
+  const { name, email, handle, password, avatar, bio } = req.body;
+  if (!email || !name || !password) {
+    return res.status(400).json({ success: false, error: "الاسم، البريد الإلكتروني وكلمة المرور مطلوبة" });
+  }
+
+  const normalizedEmail = email.trim().toLowerCase();
+  const existingUser = Object.values(db.users).find(u => u.email.toLowerCase() === normalizedEmail);
+  if (existingUser) {
+    return res.status(400).json({ success: false, error: "البريد الإلكتروني مسجل مسبقاً. يرجى تسجيل الدخول." });
+  }
+
+  const userId = "user-" + Date.now().toString(36) + "-" + Math.random().toString(36).substring(2, 6);
+  const newUser: UserAccount = {
+    id: userId,
+    name: name.trim(),
+    email: normalizedEmail,
+    handle: handle?.trim() || "@" + name.trim().replace(/\s+/g, '_').toLowerCase(),
+    password: password,
+    avatar: avatar || "https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=150&auto=format&fit=crop&q=80",
+    bio: bio || "مشارك شغوف بالفكر والمناظرات المنطقية",
+    debatesCount: 0,
+    winsCount: 0,
+    audienceVotesReceived: 0,
+  };
+
+  db.users[userId] = newUser;
+  saveDatabase();
+
+  const { password: _, ...userWithoutPassword } = newUser;
+  res.json({ success: true, user: userWithoutPassword });
+});
+
+// Auth: Sign In
+app.post("/api/auth/signin", (req: Request, res: Response) => {
+  const { email, password } = req.body;
+  if (!email || !password) {
+    return res.status(400).json({ success: false, error: "البريد الإلكتروني وكلمة المرور مطلوبة" });
+  }
+
+  const normalizedEmail = email.trim().toLowerCase();
+  const user = Object.values(db.users).find(u => u.email.toLowerCase() === normalizedEmail || u.handle.toLowerCase() === normalizedEmail);
+
+  if (!user || user.password !== password) {
+    return res.status(401).json({ success: false, error: "البريد الإلكتروني أو كلمة المرور غير صحيحة" });
+  }
+
+  const { password: _, ...userWithoutPassword } = user;
+  res.json({ success: true, user: userWithoutPassword });
+});
 
 // 1. Get All Rooms
 app.get("/api/rooms", (req: Request, res: Response) => {

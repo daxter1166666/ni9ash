@@ -8,6 +8,7 @@ import { UserProfileModal } from './components/UserProfileModal';
 import { SavedLibraryModal } from './components/SavedLibraryModal';
 import { PwaInstallBanner } from './components/PwaInstallBanner';
 import { AdminVoiceRoomsModal } from './components/AdminVoiceRoomsModal';
+import { AuthModal } from './components/AuthModal';
 import { playGavelStrike, playBellChime } from './utils/soundEffects';
 import {
   SavedDebate,
@@ -49,6 +50,7 @@ export default function App() {
   const [isProfileModalOpen, setIsProfileModalOpen] = useState(false);
   const [isLibraryModalOpen, setIsLibraryModalOpen] = useState(false);
   const [isAdminVoiceModalOpen, setIsAdminVoiceModalOpen] = useState(false);
+  const [isAuthModalOpen, setIsAuthModalOpen] = useState(false);
   const [isCreatingRoom, setIsCreatingRoom] = useState(false);
 
   // Saved debates state
@@ -692,6 +694,7 @@ export default function App() {
         onClose={() => setIsProfileModalOpen(false)}
         currentUser={currentUser}
         onSaveProfile={handleSaveProfile}
+        onOpenAuth={() => setIsAuthModalOpen(true)}
       />
 
       {/* Saved Debates Library Modal */}
@@ -710,6 +713,18 @@ export default function App() {
         onSelectRoom={(roomId) => {
           setIsAdminVoiceModalOpen(false);
           handleJoinRoom(roomId, 'audience');
+        }}
+      />
+
+      {/* Auth Modal (Sign In / Sign Up) */}
+      <AuthModal
+        isOpen={isAuthModalOpen}
+        onClose={() => setIsAuthModalOpen(false)}
+        onLoginSuccess={(user) => {
+          setCurrentUser(user);
+          try {
+            localStorage.setItem('munazara_user', JSON.stringify(user));
+          } catch {}
         }}
       />
     </div>
