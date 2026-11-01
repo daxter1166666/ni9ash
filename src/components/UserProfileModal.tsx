@@ -8,7 +8,6 @@ interface UserProfileModalProps {
   onClose: () => void;
   currentUser: UserProfile;
   onSaveProfile: (profile: UserProfile) => void;
-  onOpenAuth?: () => void;
 }
 
 export const UserProfileModal: React.FC<UserProfileModalProps> = ({
@@ -16,7 +15,6 @@ export const UserProfileModal: React.FC<UserProfileModalProps> = ({
   onClose,
   currentUser,
   onSaveProfile,
-  onOpenAuth,
 }) => {
   const { t, language, setLanguage, languages } = useTranslation();
   const [name, setName] = useState(currentUser.name);
@@ -189,24 +187,26 @@ export const UserProfileModal: React.FC<UserProfileModalProps> = ({
             </div>
           </div>
 
-          {onOpenAuth && (
-            <div className="rounded-2xl border border-indigo-100 bg-indigo-50/50 p-3 flex items-center justify-between">
-              <div>
-                <div className="text-xs font-bold text-indigo-950">مزامنة الحساب عبر الأجهزة</div>
-                <div className="text-[11px] text-indigo-700">سجل الدخول بحسابك للوصول لنقاشاتك وغرفك من أي جهاز</div>
+          {/* Secret PIN Sync Box */}
+          <div className="rounded-2xl border border-indigo-100 bg-indigo-50/50 p-3 flex items-center justify-between">
+            <div>
+              <div className="text-xs font-bold text-indigo-950">الرمز السري للحساب</div>
+              <div className="text-[11px] text-indigo-600 font-mono font-bold mt-0.5">
+                {localStorage.getItem('munazara_active_pin') || 'MUN-4829'}
               </div>
-              <button
-                type="button"
-                onClick={() => {
-                  onClose();
-                  onOpenAuth();
-                }}
-                className="rounded-xl bg-indigo-600 px-3 py-2 text-xs font-bold text-white shadow-xs hover:bg-indigo-700 transition"
-              >
-                تسجيل الدخول / إنشاء حساب
-              </button>
             </div>
-          )}
+            <button
+              type="button"
+              onClick={() => {
+                const pin = localStorage.getItem('munazara_active_pin') || 'MUN-4829';
+                navigator.clipboard.writeText(pin);
+                alert('تم نسخ الرمز السري إلى الذاكرة! يمكنك لصقه في أي جهاز آخر للدخول.');
+              }}
+              className="rounded-xl bg-white border border-indigo-200 px-3 py-1.5 text-[11px] font-bold text-indigo-700 shadow-xs hover:bg-indigo-50 transition"
+            >
+              نسخ الرمز السري 🔑
+            </button>
+          </div>
 
           <div className="flex items-center justify-end gap-2 pt-3">
             <button
