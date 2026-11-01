@@ -41,8 +41,10 @@ export const LobbyView: React.FC<LobbyViewProps> = ({
     { id: 'general', label: t('catGeneral') },
   ];
 
-  // Filter logic
+  // Filter logic: Only display non-concluded active rooms in the live lobby
   const filteredRooms = rooms.filter((r) => {
+    if (r.status === 'concluded') return false;
+
     const matchesSearch =
       r.title.toLowerCase().includes(searchQuery.toLowerCase()) ||
       r.description.toLowerCase().includes(searchQuery.toLowerCase()) ||
@@ -77,13 +79,14 @@ export const LobbyView: React.FC<LobbyViewProps> = ({
     return matchesSearch && matchesCategory && matchesVoiceMode && matchesType && matchesExactSeats && matchesLock;
   });
 
-  const countVoice = rooms.filter(r => r.mode === 'voice').length;
-  const countText = rooms.filter(r => r.mode !== 'voice').length;
-  const countSolo = rooms.filter(r => r.maxDebaters === 1 || r.roomType === 'solo').length;
-  const count1v1 = rooms.filter(r => (r.maxDebaters === 2 || r.roomType === '1v1') && r.maxDebaters !== 1).length;
-  const countGroup = rooms.filter(r => r.maxDebaters >= 3 || r.roomType === 'group').length;
-  const totalOpenSlots = rooms.reduce((acc, r) => acc + Math.max(0, r.maxDebaters - r.currentDebatersCount), 0);
-  const totalLockedRooms = rooms.filter(r => r.currentDebatersCount >= r.maxDebaters).length;
+  const activeRooms = rooms.filter(r => r.status !== 'concluded');
+  const countVoice = activeRooms.filter(r => r.mode === 'voice').length;
+  const countText = activeRooms.filter(r => r.mode !== 'voice').length;
+  const countSolo = activeRooms.filter(r => r.maxDebaters === 1 || r.roomType === 'solo').length;
+  const count1v1 = activeRooms.filter(r => (r.maxDebaters === 2 || r.roomType === '1v1') && r.maxDebaters !== 1).length;
+  const countGroup = activeRooms.filter(r => r.maxDebaters >= 3 || r.roomType === 'group').length;
+  const totalOpenSlots = activeRooms.reduce((acc, r) => acc + Math.max(0, r.maxDebaters - r.currentDebatersCount), 0);
+  const totalLockedRooms = activeRooms.filter(r => r.currentDebatersCount >= r.maxDebaters).length;
 
   return (
     <div className="mx-auto max-w-7xl px-4 py-8 sm:px-6 space-y-8">

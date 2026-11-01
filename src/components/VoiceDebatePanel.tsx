@@ -24,6 +24,7 @@ import {
 import { DebateRoom, Participant, Stance, UserProfile } from '../types';
 import { VoiceConnectionStatus } from '../services/livekitAudio';
 import { useTranslation } from '../i18n/LanguageContext';
+import { ConfirmEndRoomModal } from './ConfirmEndRoomModal';
 
 interface VoiceDebatePanelProps {
   room: DebateRoom;
@@ -74,6 +75,8 @@ export const VoiceDebatePanel: React.FC<VoiceDebatePanelProps> = ({
 }) => {
   const { t, dir } = useTranslation();
   const [selectedUserActionMenu, setSelectedUserActionMenu] = useState<string | null>(null);
+  const [isConfirmEndOpen, setIsConfirmEndOpen] = useState(false);
+  const [isEnding, setIsEnding] = useState(false);
 
   const debaters = room.participants.filter((p) => p.role === 'host' || p.role === 'debater');
   const activeSpeaker = debaters.find((d) => d.id === room.currentSpeakerId) || debaters[0];
@@ -311,7 +314,7 @@ export const VoiceDebatePanel: React.FC<VoiceDebatePanelProps> = ({
               <Mic className="h-5 w-5" />
             </div>
             <span className="text-xs font-bold text-gray-700 group-hover:text-indigo-600">
-              {t('openSeatLabel')}
+              {t('openSeatLabel', { seat: debaters.length + idx + 1 })}
             </span>
             <span className="text-[10px] text-gray-400">
               {t('clickToTakeSeatHint')}
@@ -441,12 +444,8 @@ export const VoiceDebatePanel: React.FC<VoiceDebatePanelProps> = ({
               )}
               <button
                 type="button"
-                onClick={() => {
-                  if (window.confirm(t('confirmEndRoomPrompt'))) {
-                    onHostEndRoom?.();
-                  }
-                }}
-                className="flex items-center gap-1 rounded-xl bg-rose-50 border border-rose-200 px-3 py-2 text-xs font-bold text-rose-700 hover:bg-rose-100 transition"
+                onClick={() => setIsConfirmEndOpen(true)}
+                className="flex items-center gap-1 rounded-xl bg-rose-50 border border-rose-200 px-3 py-2 text-xs font-bold text-rose-700 hover:bg-rose-100 transition shadow-xs active:scale-95"
                 title={t('endDebateBtn')}
               >
                 <span>{t('endDebateBtn')}</span>
@@ -455,6 +454,25 @@ export const VoiceDebatePanel: React.FC<VoiceDebatePanelProps> = ({
           )}
         </div>
       </div>
+
+      {/* In-App End Room Confirmation Modal */}
+      <ConfirmEndRoomModal
+        isOpen={isConfirmEndOpen}
+        onClose={() => {
+          if (!isEnding) setIsConfirmEndOpen(false);
+        }}
+        roomTitle={room.title}
+        isEnding={isEnding}
+        onConfirm={async () => {
+          setIsEnding(true);
+          try {
+            await onHostEndRoom?.();
+          } finally {
+            setIsEnding(false);
+            setIsConfirmEndOpen(false);
+          }
+        }}
+      />
     </div>
   );
 };

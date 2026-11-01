@@ -20,6 +20,7 @@ interface CreateRoomModalProps {
   }) => void;
   isCreating?: boolean;
   voiceOnlyMode?: boolean;
+  serverError?: string | null;
 }
 
 export const CreateRoomModal: React.FC<CreateRoomModalProps> = ({
@@ -28,9 +29,10 @@ export const CreateRoomModal: React.FC<CreateRoomModalProps> = ({
   onCreateRoom,
   isCreating = false,
   voiceOnlyMode = false,
+  serverError = null,
 }) => {
   const { t } = useTranslation();
-  const [mode, setMode] = useState<'text' | 'voice'>(voiceOnlyMode ? 'voice' : 'voice');
+  const [mode, setMode] = useState<'text' | 'voice'>('voice');
   const [freeTalk, setFreeTalk] = useState<boolean>(false);
   const [roomType, setRoomType] = useState<'solo' | '1v1' | 'group'>('1v1');
   const [title, setTitle] = useState('');
@@ -40,6 +42,7 @@ export const CreateRoomModal: React.FC<CreateRoomModalProps> = ({
   const [turnDurationSec, setTurnDurationSec] = useState<number>(90);
   const [hostStance, setHostStance] = useState<Stance>('pro');
   const [customTags, setCustomTags] = useState<string>('مناظرة_صوتية, حوار');
+  const [formError, setFormError] = useState<string | null>(null);
 
   if (!isOpen) return null;
 
@@ -66,7 +69,15 @@ export const CreateRoomModal: React.FC<CreateRoomModalProps> = ({
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
-    if (!title.trim() || !description.trim()) return;
+    setFormError(null);
+
+    const trimmedTitle = title.trim();
+    if (!trimmedTitle) {
+      setFormError(t('errorTitleRequired'));
+      return;
+    }
+
+    const finalDescription = description.trim() || trimmedTitle;
 
     const tagsArray = customTags
       .split(/[,،]/)
@@ -74,8 +85,8 @@ export const CreateRoomModal: React.FC<CreateRoomModalProps> = ({
       .filter(Boolean);
 
     onCreateRoom({
-      title: title.trim(),
-      description: description.trim(),
+      title: trimmedTitle,
+      description: finalDescription,
       category,
       roomType: maxDebaters === 1 ? 'solo' : maxDebaters === 2 ? '1v1' : 'group',
       maxDebaters: Math.max(1, Math.min(5, Number(maxDebaters))),
@@ -98,35 +109,39 @@ export const CreateRoomModal: React.FC<CreateRoomModalProps> = ({
   ];
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4 backdrop-blur-sm overflow-y-auto">
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-3 sm:p-4 backdrop-blur-sm">
       <div
         id="create-room-modal-container"
-        className="relative my-8 w-full max-w-2xl rounded-3xl border border-gray-100 bg-white p-6 shadow-2xl text-gray-900 sm:p-8"
+        className="relative w-full max-w-2xl max-h-[90vh] sm:max-h-[88vh] rounded-3xl border border-gray-100 bg-white shadow-2xl text-gray-900 flex flex-col overflow-hidden"
       >
-        {/* Close Button */}
-        <button
-          id="close-create-modal-btn"
-          onClick={onClose}
-          className="absolute left-6 top-6 rounded-2xl p-2 text-gray-400 hover:bg-gray-100 hover:text-gray-700 transition"
-        >
-          <X className="h-5 w-5" />
-        </button>
-
-        {/* Modal Header */}
-        <div className="mb-6">
-          <div className="flex items-center gap-2 text-indigo-600 text-xs font-bold uppercase tracking-wider mb-1">
-            <Sparkles className="h-4 w-4" />
-            <span>{t('createModalBadge')}</span>
+        {/* Pinned Header (Always visible at the top) */}
+        <div className="shrink-0 p-5 sm:p-6 pb-4 border-b border-gray-100 bg-white flex items-start justify-between gap-4">
+          <div>
+            <div className="flex items-center gap-1.5 text-indigo-600 text-xs font-bold uppercase tracking-wider mb-1">
+              <Sparkles className="h-4 w-4" />
+              <span>{t('createModalSubtitle')}</span>
+            </div>
+            <h2 className="font-heading text-xl sm:text-2xl font-bold text-gray-900">
+              {t('createModalTitle')}
+            </h2>
+            <p className="text-xs text-gray-500 mt-1">
+              {t('createModalHint')}
+            </p>
           </div>
-          <h2 className="font-heading text-2xl font-bold text-gray-900">
-            {t('createModalTitle')}
-          </h2>
-          <p className="text-xs text-gray-500 mt-1">
-            {t('createModalDesc')}
-          </p>
+          <button
+            id="close-create-modal-btn"
+            onClick={onClose}
+            type="button"
+            className="rounded-2xl p-2 text-gray-400 hover:bg-gray-100 hover:text-gray-700 transition shrink-0"
+            title={t('cancel')}
+          >
+            <X className="h-5 w-5" />
+          </button>
         </div>
 
-        <form onSubmit={handleSubmit} className="space-y-6">
+        <form onSubmit={handleSubmit} className="flex flex-col flex-1 min-h-0 overflow-hidden">
+          {/* Scrollable Form Body */}
+          <div className="flex-1 overflow-y-auto p-5 sm:p-6 space-y-5">
           {/* Mode Selector: Voice Room vs Text Debate */}
           {!voiceOnlyMode ? (
             <div>
@@ -332,13 +347,16 @@ export const CreateRoomModal: React.FC<CreateRoomModalProps> = ({
           <div className="space-y-4">
             <div>
               <label className="block text-xs font-bold text-gray-700 mb-1.5">
-                {t('roomTopicLabel')} *
+                {t('roomTopicLabel')} <span className="text-rose-500">*</span>
               </label>
               <input
                 id="create-room-title-input"
                 type="text"
                 value={title}
-                onChange={(e) => setTitle(e.target.value)}
+                onChange={(e) => {
+                  setTitle(e.target.value);
+                  if (formError) setFormError(null);
+                }}
                 placeholder={t('roomTopicPlaceholder')}
                 required
                 className="w-full rounded-2xl border border-gray-200 bg-white p-3 text-sm text-gray-900 placeholder:text-gray-400 focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500 shadow-xs"
@@ -347,15 +365,14 @@ export const CreateRoomModal: React.FC<CreateRoomModalProps> = ({
 
             <div>
               <label className="block text-xs font-bold text-gray-700 mb-1.5">
-                {t('roomContextLabel')} *
+                {t('roomContextLabel')}
               </label>
               <textarea
                 id="create-room-desc-input"
                 value={description}
                 onChange={(e) => setDescription(e.target.value)}
-                rows={3}
+                rows={2}
                 placeholder={t('roomContextPlaceholder')}
-                required
                 className="w-full rounded-2xl border border-gray-200 bg-white p-3 text-sm text-gray-900 placeholder:text-gray-400 focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500 shadow-xs resize-none"
               />
             </div>
@@ -415,20 +432,32 @@ export const CreateRoomModal: React.FC<CreateRoomModalProps> = ({
             </div>
           </div>
 
-          {/* Submit Actions */}
-          <div className="flex items-center justify-end gap-3 pt-4 border-t border-gray-100">
+          {/* Error Banner if validation or server error occurs */}
+          {(formError || serverError) && (
+            <div className="flex items-center gap-2.5 rounded-2xl border border-rose-200 bg-rose-50/80 p-3.5 text-xs text-rose-800">
+              <ShieldAlert className="h-5 w-5 shrink-0 text-rose-600" />
+              <div className="font-medium leading-relaxed">
+                {formError || serverError}
+              </div>
+            </div>
+          )}
+          </div>
+
+          {/* Pinned Footer (Always visible at the bottom) */}
+          <div className="shrink-0 flex items-center justify-end gap-3 p-4 sm:p-5 border-t border-gray-100 bg-gray-50/90">
             <button
               type="button"
               onClick={onClose}
-              className="rounded-2xl border border-gray-200 bg-white px-5 py-2.5 text-xs font-semibold text-gray-700 transition hover:bg-gray-50"
+              disabled={isCreating}
+              className="rounded-2xl border border-gray-200 bg-white px-5 py-2.5 text-xs font-semibold text-gray-700 transition hover:bg-gray-100 disabled:opacity-50"
             >
               {t('cancel')}
             </button>
             <button
               type="submit"
               id="submit-create-room-btn"
-              disabled={isCreating || !title.trim() || !description.trim()}
-              className="flex items-center gap-2 rounded-2xl bg-indigo-600 px-6 py-2.5 text-xs font-bold text-white shadow-md shadow-indigo-100 transition hover:bg-indigo-700 disabled:opacity-50 active:scale-95"
+              disabled={isCreating || !title.trim()}
+              className="flex items-center gap-2 rounded-2xl bg-indigo-600 px-6 py-2.5 text-xs font-bold text-white shadow-md shadow-indigo-100 transition hover:bg-indigo-700 disabled:opacity-50 active:scale-95 cursor-pointer disabled:cursor-not-allowed"
             >
               <Sparkles className="h-4 w-4" />
               <span>{isCreating ? t('launchingRoom') : t('launchRoomBtn')}</span>

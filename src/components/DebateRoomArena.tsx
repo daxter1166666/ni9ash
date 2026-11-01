@@ -12,6 +12,7 @@ import { useTranslation } from '../i18n/LanguageContext';
 import { VoiceDebatePanel } from './VoiceDebatePanel';
 import { MicCheckModal } from './MicCheckModal';
 import { ReportModal } from './ReportModal';
+import { ConfirmEndRoomModal } from './ConfirmEndRoomModal';
 import { useLiveKitVoice } from '../hooks/useLiveKitVoice';
 
 interface DebateRoomArenaProps {
@@ -85,6 +86,8 @@ export const DebateRoomArena: React.FC<DebateRoomArenaProps> = ({
   const [floatingReactions, setFloatingReactions] = useState<FloatingReactionItem[]>([]);
   const [soundEnabled, setSoundEnabled] = useState(true);
   const [copiedLink, setCopiedLink] = useState(false);
+  const [isConfirmEndOpen, setIsConfirmEndOpen] = useState(false);
+  const [isEndingRoom, setIsEndingRoom] = useState(false);
 
   // Turn timer countdown state (calculated against server turnStartedAt)
   const [timeLeftInTurn, setTimeLeftInTurn] = useState<number>(() => {
@@ -96,8 +99,8 @@ export const DebateRoomArena: React.FC<DebateRoomArenaProps> = ({
   });
 
   const myParticipant = room.participants.find((p) => p.id === currentUser.id);
-  const isCurrentUserDebater = myParticipant ? myParticipant.role === 'host' || myParticipant.role === 'debater' : false;
-  const isCurrentUserHost = myParticipant?.role === 'host';
+  const isCurrentUserDebater = myParticipant ? myParticipant.role === 'host' || myParticipant.role === 'debater' : room.hostId === currentUser.id;
+  const isCurrentUserHost = (room.hostId === currentUser.id) || (myParticipant?.role === 'host');
   const myStance = myParticipant?.stance || 'pro';
   const isMyTurn = room.currentSpeakerId === currentUser.id;
   const isVoiceMode = room.mode === 'voice';
@@ -267,8 +270,46 @@ export const DebateRoomArena: React.FC<DebateRoomArenaProps> = ({
           >
             {soundEnabled ? <Volume2 className="h-4 w-4 text-indigo-600" /> : <VolumeX className="h-4 w-4" />}
           </button>
+
+          {isCurrentUserHost && (
+            <button
+              id="header-end-room-btn"
+              type="button"
+              onClick={() => setIsConfirmEndOpen(true)}
+              className="flex items-center gap-1.5 rounded-2xl border border-rose-200 bg-rose-50 px-3.5 py-2 text-xs font-bold text-rose-700 hover:bg-rose-100 transition shadow-xs active:scale-95"
+              title={t('endDebateBtn')}
+            >
+              <span>{t('endDebateBtn')}</span>
+            </button>
+          )}
         </div>
       </div>
+
+      {/* Concluded Room Notification Banner */}
+      {room.status === 'concluded' && (
+        <div className="flex flex-col sm:flex-row items-center justify-between gap-3 rounded-3xl border border-rose-200 bg-rose-50/90 p-4 sm:p-5 shadow-xs">
+          <div className="flex items-center gap-3">
+            <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-2xl bg-rose-600 text-white font-bold text-lg">
+              🏁
+            </span>
+            <div>
+              <h3 className="font-bold text-sm sm:text-base text-rose-900">
+                {t('roomEndedNotice')}
+              </h3>
+              <p className="text-xs text-rose-700">
+                {t('roomEndedDesc')}
+              </p>
+            </div>
+          </div>
+          <button
+            type="button"
+            onClick={onBackToLobby}
+            className="w-full sm:w-auto flex items-center justify-center gap-2 rounded-2xl bg-rose-600 px-5 py-2.5 text-xs font-bold text-white hover:bg-rose-700 transition shadow-xs active:scale-95"
+          >
+            <span>{t('returnToLobbyBtn')}</span>
+          </button>
+        </div>
+      )}
 
       {/* Debater Stage Bar (in text mode) */}
       {!isVoiceMode && (
@@ -402,6 +443,25 @@ export const DebateRoomArena: React.FC<DebateRoomArenaProps> = ({
         onSubmitReport={(data) => {
           if (onSubmitReport) {
             onSubmitReport(data);
+          }
+        }}
+      />
+
+      {/* Host End Room Confirmation Modal */}
+      <ConfirmEndRoomModal
+        isOpen={isConfirmEndOpen}
+        onClose={() => {
+          if (!isEndingRoom) setIsConfirmEndOpen(false);
+        }}
+        roomTitle={room.title}
+        isEnding={isEndingRoom}
+        onConfirm={async () => {
+          setIsEndingRoom(true);
+          try {
+            await onHostEndRoom?.();
+          } finally {
+            setIsEndingRoom(false);
+            setIsConfirmEndOpen(false);
           }
         }}
       />

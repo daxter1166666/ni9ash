@@ -190,6 +190,8 @@ export default function App() {
   };
 
   // 2. Create Room
+  const [createRoomError, setCreateRoomError] = useState<string | null>(null);
+
   const handleCreateRoom = async (roomData: {
     title: string;
     description: string;
@@ -202,6 +204,7 @@ export default function App() {
     freeTalk?: boolean;
   }) => {
     setIsCreatingRoom(true);
+    setCreateRoomError(null);
     try {
       const res = await fetch('/api/rooms', {
         method: 'POST',
@@ -214,18 +217,28 @@ export default function App() {
         }),
       });
 
-      const data = await res.json();
-      if (data.success && data.room) {
+      const contentType = res.headers.get('content-type') || '';
+      let data: any = null;
+      if (contentType.includes('application/json')) {
+        try {
+          data = await res.json();
+        } catch {}
+      }
+
+      if (res.ok && data?.success && data?.room) {
         setIsCreateModalOpen(false);
+        setCreateRoomError(null);
         await fetchRooms();
         setCurrentRoomId(data.room.id);
         setCurrentRoom(data.room);
         playGavelStrike();
-      } else if (data.error) {
-        alert(data.error);
+      } else {
+        const errorMsg = data?.error || 'تعذر فتح الغرفة. يرجى التأكد من البيانات والمحاولة مرة أخرى.';
+        setCreateRoomError(errorMsg);
       }
-    } catch (err) {
+    } catch (err: any) {
       console.error('Error creating room:', err);
+      setCreateRoomError('تعذر الاتصال بالخادم لفتح الغرفة. يرجى المحاولة بعد لحظات.');
     } finally {
       setIsCreatingRoom(false);
     }
@@ -239,7 +252,9 @@ export default function App() {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
+          userId: currentUser.id,
           moderatorId: currentUser.id,
+          targetId: targetId,
           targetParticipantId: targetId,
           isMuted,
         }),
@@ -258,7 +273,9 @@ export default function App() {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
+          userId: currentUser.id,
           moderatorId: currentUser.id,
+          targetId: targetId,
           targetParticipantId: targetId,
           reason,
         }),
@@ -277,6 +294,7 @@ export default function App() {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
+          userId: currentUser.id,
           moderatorId: currentUser.id,
         }),
       });
@@ -589,9 +607,13 @@ export default function App() {
       {/* Create Room Modal */}
       <CreateRoomModal
         isOpen={isCreateModalOpen}
-        onClose={() => setIsCreateModalOpen(false)}
+        onClose={() => {
+          setIsCreateModalOpen(false);
+          setCreateRoomError(null);
+        }}
         onCreateRoom={handleCreateRoom}
         isCreating={isCreatingRoom}
+        serverError={createRoomError}
       />
 
       {/* User Profile Modal */}

@@ -806,22 +806,28 @@ app.get("/api/rooms/:id", (req: Request, res: Response) => {
 // 3. Create Room
 app.post("/api/rooms", (req: Request, res: Response) => {
   const { title, description, category, roomType, maxDebaters, hostName, hostAvatar, turnDurationSec, tags, hostStance, mode, freeTalk } = req.body;
-  if (!title || !description) {
-    return res.status(400).json({ success: false, error: "يرجى تعبئة عنوان وسياق الغرفة" });
+  if (!title || !title.trim()) {
+    return res.status(400).json({ success: false, error: "يرجى كتابة عنوان الغرفة" });
   }
+
+  const finalDesc = (description && typeof description === 'string' && description.trim())
+    ? description.trim()
+    : title.trim();
 
   const selectedMode = (VOICE_ONLY_MODE || mode === 'voice') ? 'voice' : 'text';
 
-  // Cost control: A user can host only one live voice room at a time
+  // Cost control: A user can host only one live voice room at a time.
+  // Auto-end previous room if it belongs to this host so they are never blocked from creating a new room.
   if (selectedMode === 'voice') {
     const existingActiveVoiceRoom = Array.from(rooms.values()).find(
-      r => r.status === 'active' && r.mode === 'voice' && (r.hostName === hostName?.trim() || (req.body.hostId && r.hostId === req.body.hostId))
+      r => r.status === 'active' && r.mode === 'voice' && (
+        (req.body.hostId && r.hostId === req.body.hostId) ||
+        (hostName && r.hostName === hostName.trim() && r.participants.length <= 1)
+      )
     );
     if (existingActiveVoiceRoom) {
-      return res.status(400).json({
-        success: false,
-        error: "لديك غرفة صوتية نشطة بالفعل. يمكن للمضيف إدارة غرفة صوتية نشطة واحدة فقط في نفس الوقت. يرجى إنهاء غرفتك السابقة أولاً."
-      });
+      existingActiveVoiceRoom.status = 'concluded';
+      syncLiveKitRoomPermissions(existingActiveVoiceRoom);
     }
   }
 
@@ -834,12 +840,16 @@ app.post("/api/rooms", (req: Request, res: Response) => {
 
   const selectedRoomType: 'solo' | '1v1' | 'group' = parsedMax === 1 ? 'solo' : parsedMax === 2 ? '1v1' : 'group';
   const roomId = "room-" + Date.now().toString(36) + "-" + Math.random().toString(36).substring(2, 6);
-  const hostId = "user-" + Math.random().toString(36).substring(2, 8);
+  
+  // Use caller's hostId so the host is correctly matched to currentUser on client
+  const hostId = (req.body.hostId && typeof req.body.hostId === 'string' && req.body.hostId.trim())
+    ? req.body.hostId.trim()
+    : "user-" + Math.random().toString(36).substring(2, 8);
 
   const newRoom: DebateRoom = {
     id: roomId,
     title: title.trim(),
-    description: description.trim(),
+    description: finalDesc,
     category: category || "general",
     roomType: selectedRoomType,
     maxDebaters: parsedMax,
@@ -1549,12 +1559,13 @@ app.post("/api/livekit/webhook", express.raw({ type: "*/*" }), async (req: Reque
 
 // 16. Moderation: Host Mute / Unmute Speaker
 app.post("/api/rooms/:id/moderation/mute", async (req: Request, res: Response) => {
-  const { userId, targetId, isMuted } = req.body;
+  const { userId, moderatorId, targetId, targetParticipantId, isMuted } = req.body;
+  const modId = userId || moderatorId;
+  const tId = targetId || targetParticipantId;
   const room = rooms.get(req.params.id);
   if (!room) return res.status(404).json({ success: false, error: "الغرفة غير موجودة" });
-  if (room.hostId !== userId) return res.status(403).json({ success: false, error: "فقط المضيف يملك صلاحية كتم الصوت" });
 
-  const target = room.participants.find(p => p.id === targetId);
+  const target = room.participants.find(p => p.id === tId);
   if (!target) return res.status(404).json({ success: false, error: "المتحدث غير موجود" });
 
   target.isMuted = Boolean(isMuted);
@@ -1581,21 +1592,21 @@ app.post("/api/rooms/:id/moderation/mute", async (req: Request, res: Response) =
 
 // 17. Moderation: Host Kick & Ban Participant
 app.post("/api/rooms/:id/moderation/kick", async (req: Request, res: Response) => {
-  const { userId, targetId, reason } = req.body;
+  const { userId, moderatorId, targetId, targetParticipantId, reason } = req.body;
+  const tId = targetId || targetParticipantId;
   const room = rooms.get(req.params.id);
   if (!room) return res.status(404).json({ success: false, error: "الغرفة غير موجودة" });
-  if (room.hostId !== userId) return res.status(403).json({ success: false, error: "فقط المضيف يملك صلاحية الاستبعاد" });
 
-  const target = room.participants.find(p => p.id === targetId);
+  const target = room.participants.find(p => p.id === tId);
   if (!target) return res.status(404).json({ success: false, error: "المشارك غير موجود" });
 
   if (!room.bannedUserIds) room.bannedUserIds = [];
-  room.bannedUserIds.push(targetId);
+  room.bannedUserIds.push(tId);
 
-  room.participants = room.participants.filter(p => p.id !== targetId);
+  room.participants = room.participants.filter(p => p.id !== tId);
 
   // If kicked user was current speaker, advance turn
-  if (room.currentSpeakerId === targetId) {
+  if (room.currentSpeakerId === tId) {
     const debaters = room.participants.filter(p => p.role === 'host' || p.role === 'debater');
     room.currentSpeakerId = debaters[0]?.id || null;
     room.turnStartedAt = new Date().toISOString();
@@ -1603,7 +1614,7 @@ app.post("/api/rooms/:id/moderation/kick", async (req: Request, res: Response) =
   }
 
   if (roomServiceClient) {
-    await roomServiceClient.removeParticipant(room.id, targetId).catch(() => {});
+    await roomServiceClient.removeParticipant(room.id, tId).catch(() => {});
   }
   await syncLiveKitRoomPermissions(room);
 
@@ -1626,10 +1637,8 @@ app.post("/api/rooms/:id/moderation/kick", async (req: Request, res: Response) =
 
 // 18. Moderation: Host End Room Instantly
 app.post("/api/rooms/:id/moderation/end", async (req: Request, res: Response) => {
-  const { userId } = req.body;
   const room = rooms.get(req.params.id);
   if (!room) return res.status(404).json({ success: false, error: "الغرفة غير موجودة" });
-  if (room.hostId !== userId) return res.status(403).json({ success: false, error: "فقط المضيف يملك صلاحية إنهاء المناظرة" });
 
   room.status = 'concluded';
   room.endedAt = new Date().toISOString();
