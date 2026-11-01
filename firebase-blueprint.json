@@ -1,0 +1,37 @@
+{
+  "entities": {
+    "Room": {
+      "title": "Debate Room",
+      "description": "A live debate or discussion room",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "title": { "type": "string" },
+        "description": { "type": "string" },
+        "category": { "type": "string" },
+        "roomType": { "type": "string" },
+        "maxDebaters": { "type": "number" },
+        "currentDebatersCount": { "type": "number" },
+        "isLockedForDebaters": { "type": "boolean" },
+        "hostId": { "type": "string" },
+        "hostName": { "type": "string" },
+        "hostAvatar": { "type": "string" },
+        "createdAt": { "type": "string" },
+        "status": { "type": "string" },
+        "turnDurationSec": { "type": "number" },
+        "mode": { "type": "string" },
+        "freeTalk": { "type": "boolean" },
+        "proVotes": { "type": "number" },
+        "conVotes": { "type": "number" },
+        "neutralVotes": { "type": "number" }
+      },
+      "required": ["id", "title", "hostId", "status"]
+    }
+  },
+  "firestore": {
+    "rooms/{roomId}": {
+      "schema": "Room",
+      "description": "Firestore collection of active debate and voice rooms"
+    }
+  }
+}

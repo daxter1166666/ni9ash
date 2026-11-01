@@ -15,6 +15,7 @@ interface HeaderProps {
   totalActiveRooms?: number;
   totalDebaters?: number;
   totalSpectators?: number;
+  onOpenAuthModal?: () => void;
 }
 
 export const Header: React.FC<HeaderProps> = ({
@@ -28,6 +29,7 @@ export const Header: React.FC<HeaderProps> = ({
   totalActiveRooms = 4,
   totalDebaters = 12,
   totalSpectators = 340,
+  onOpenAuthModal,
 }) => {
   const { t, language, setLanguage, languages } = useTranslation();
   const [isLangDropdownOpen, setIsLangDropdownOpen] = useState(false);
@@ -196,6 +198,17 @@ export const Header: React.FC<HeaderProps> = ({
               <div className="text-xs font-bold text-gray-900 line-clamp-1">{currentUser.name}</div>
               <div className="text-[10px] font-medium text-indigo-600">{currentUser.handle}</div>
             </div>
+          </button>
+
+          {/* Quick Auth / PIN Login Button */}
+          <button
+            id="open-auth-modal-btn"
+            onClick={onOpenAuthModal}
+            className="flex items-center gap-1.5 rounded-2xl border border-indigo-200 bg-indigo-50 px-3 py-2 text-xs font-bold text-indigo-700 transition hover:bg-indigo-100 shadow-xs"
+            title="تسجيل الدخول / الرمز السري"
+          >
+            <span>🔑</span>
+            <span className="hidden md:inline">الدخول برمز</span>
           </button>
         </div>
       </div>

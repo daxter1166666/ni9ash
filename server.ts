@@ -1037,6 +1037,7 @@ app.post("/api/rooms", (req: Request, res: Response) => {
   };
 
   rooms.set(roomId, newRoom);
+  saveDatabase();
   res.json({ success: true, room: newRoom, hostId });
 });
 
@@ -1112,6 +1113,7 @@ app.post("/api/rooms/:id/join", (req: Request, res: Response) => {
   room.isLockedForDebaters = updatedDebatersCount >= room.maxDebaters;
 
   syncLiveKitRoomPermissions(room);
+  saveDatabase();
 
   res.json({
     success: true,

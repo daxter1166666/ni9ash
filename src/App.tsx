@@ -517,6 +517,7 @@ export default function App() {
         onOpenCreateModal={() => setIsCreateModalOpen(true)}
         onOpenProfileModal={() => setIsProfileModalOpen(true)}
         onOpenLibrary={() => setIsLibraryModalOpen(true)}
+        onOpenAuthModal={() => setIsAuthModalOpen(true)}
         savedDebatesCount={savedDebates.length}
         onBackToLobby={() => {
           setCurrentRoomId(null);
