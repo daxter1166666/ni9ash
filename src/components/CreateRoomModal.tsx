@@ -109,10 +109,10 @@ export const CreateRoomModal: React.FC<CreateRoomModalProps> = ({
   ];
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-3 sm:p-4 backdrop-blur-sm">
+    <div className="fixed inset-0 z-50 flex items-start sm:items-center justify-center bg-black/60 p-3 sm:p-4 backdrop-blur-sm overflow-y-auto">
       <div
         id="create-room-modal-container"
-        className="relative w-full max-w-2xl max-h-[90vh] sm:max-h-[88vh] rounded-3xl border border-gray-100 bg-white shadow-2xl text-gray-900 flex flex-col overflow-hidden"
+        className="relative w-full max-w-2xl my-auto max-h-[90vh] sm:max-h-[88vh] rounded-3xl border border-gray-100 bg-white shadow-2xl text-gray-900 flex flex-col overflow-hidden"
       >
         {/* Pinned Header (Always visible at the top) */}
         <div className="shrink-0 p-5 sm:p-6 pb-4 border-b border-gray-100 bg-white flex items-start justify-between gap-4">
